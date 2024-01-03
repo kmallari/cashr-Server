@@ -45,3 +45,4 @@ func InvalidQueryParamError(message string) string {
 func SuccessfulDeleteMessage(table string, id string) string {
 	return fmt.Sprintf("Successfully deleted from table `%s` with id: `%s`", table, id)
 }
+func ConvertToKey(index int, key string) string { return fmt.Sprintf("$%s_%v", key, index) }

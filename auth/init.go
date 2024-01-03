@@ -2,12 +2,15 @@ package auth
 
 import (
 	"encoding/json"
+	"github.com/kmallari/cashr-Server/api/utils"
 	"github.com/kmallari/cashr-Server/email"
 	"github.com/supertokens/supertokens-golang/ingredients/emaildelivery"
 	"github.com/supertokens/supertokens-golang/recipe/dashboard"
 	"github.com/supertokens/supertokens-golang/recipe/emailverification"
 	"github.com/supertokens/supertokens-golang/recipe/emailverification/evmodels"
 	"github.com/supertokens/supertokens-golang/recipe/session"
+	"github.com/supertokens/supertokens-golang/recipe/session/sessmodels"
+	_ "github.com/supertokens/supertokens-golang/recipe/session/sessmodels"
 	"github.com/supertokens/supertokens-golang/recipe/thirdparty/tpmodels"
 	"github.com/supertokens/supertokens-golang/recipe/thirdpartyemailpassword"
 	"github.com/supertokens/supertokens-golang/recipe/thirdpartyemailpassword/tpepmodels"
@@ -32,7 +35,7 @@ function generateApiKey() {
 }
 */
 
-func Init() {
+func init() {
 	apiDomain := os.Getenv("API_DOMAIN")
 	clientDomain := os.Getenv("CLIENT_DOMAIN")
 
@@ -51,7 +54,7 @@ func Init() {
 			APIKey:        supertokensApiKey,
 		},
 		AppInfo: supertokens.AppInfo{
-			AppName:       "Cashr Auth",
+			AppName:       "Cashr Server",
 			APIDomain:     apiDomain,
 			WebsiteDomain: clientDomain,
 		},
@@ -67,6 +70,27 @@ func Init() {
 							return nil
 						}
 
+						return originalImplementation
+					},
+				},
+				Override: &evmodels.OverrideStruct{
+					APIs: func(originalImplementation evmodels.APIInterface) evmodels.APIInterface {
+						ogVerifyEmailPOST := *originalImplementation.VerifyEmailPOST
+						*originalImplementation.VerifyEmailPOST = func(token string, sessionContainer sessmodels.SessionContainer, tenantId string, options evmodels.APIOptions, userContext supertokens.UserContext) (evmodels.VerifyEmailPOSTResponse, error) {
+							resp, err := ogVerifyEmailPOST(token, sessionContainer, tenantId, options, userContext)
+							if err != nil {
+								return evmodels.VerifyEmailPOSTResponse{}, err
+							}
+
+							if resp.OK != nil {
+								id := resp.OK.User.ID
+
+								// TODO: post email verification logic
+								createDefaultCategoriesForUser(id)
+							}
+
+							return resp, nil
+						}
 						return originalImplementation
 					},
 				},
@@ -134,6 +158,38 @@ func Init() {
 						},
 					},
 				},
+				Override: &tpepmodels.OverrideStruct{
+					Functions: func(originalImplementation tpepmodels.RecipeInterface) tpepmodels.RecipeInterface {
+						// create a copy of the originalImplementation
+						originalThirdPartySignInUp := *originalImplementation.ThirdPartySignInUp
+
+						// override the thirdparty sign in / up function
+						*originalImplementation.ThirdPartySignInUp = func(thirdPartyID, thirdPartyUserID, email string, oAuthTokens tpmodels.TypeOAuthTokens, rawUserInfoFromProvider tpmodels.TypeRawUserInfoFromProvider, tenantId string, userContext supertokens.UserContext) (tpepmodels.SignInUpResponse, error) {
+
+							// TODO: some pre sign in / up logic
+
+							resp, err := originalThirdPartySignInUp(thirdPartyID, thirdPartyUserID, email, oAuthTokens, rawUserInfoFromProvider, tenantId, userContext)
+							if err != nil {
+								return tpepmodels.SignInUpResponse{}, err
+							}
+
+							if resp.OK != nil {
+								userID := resp.OK.User.ID
+
+								if resp.OK.CreatedNewUser {
+									// TODO: Post sign up logic
+									createDefaultCategoriesForUser(userID)
+								} else {
+									// TODO: Post sign in logic
+								}
+							}
+
+							return resp, err
+						}
+
+						return originalImplementation
+					},
+				},
 			}),
 			session.Init(nil),
 			dashboard.Init(nil),
@@ -157,8 +213,8 @@ func SessionInfo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		err = supertokens.ErrorHandler(err, r, w)
 		if err != nil {
-			w.WriteHeader(500)
-			w.Write([]byte(err.Error()))
+			utils.SendJSONResponse(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		return
 	}
@@ -176,4 +232,23 @@ func SessionInfo(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Write(bytes)
 	}
+}
+
+func UserInfo(w http.ResponseWriter, r *http.Request) {
+	sessionContainer := session.GetSessionFromRequestContext(r.Context())
+	if sessionContainer == nil {
+		w.WriteHeader(500)
+		w.Write([]byte("no session found"))
+		return
+	}
+
+	userID := sessionContainer.GetUserID()
+
+	// You can learn more about the `User` object over here https://github.com/supertokens/core-driver-interface/wiki
+	userInfo, err := thirdpartyemailpassword.GetUserById(userID)
+	if err != nil {
+		utils.SendJSONResponse(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.SendJSONResponse(w, http.StatusOK, userInfo)
 }

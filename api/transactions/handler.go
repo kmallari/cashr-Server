@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/kmallari/cashr-Server/api/utils"
-	db "github.com/kmallari/cashr-Server/db/postgres"
+	"github.com/kmallari/cashr-Server/db"
+	sqlc "github.com/kmallari/cashr-Server/db/postgres"
 	"github.com/supertokens/supertokens-golang/recipe/session"
 	"log"
 	"net/http"
@@ -12,14 +13,13 @@ import (
 
 func Handler(r *mux.Router) {
 	r.HandleFunc("", session.VerifySession(nil, createTransaction)).Methods(http.MethodPost)
-	r.HandleFunc("/user", session.VerifySession(nil, getUserTransactions)).Methods(http.MethodGet)
+	r.HandleFunc("", session.VerifySession(nil, getUserTransactions)).Methods(http.MethodGet)
 	r.HandleFunc("/{id}", updateTransaction).Methods(http.MethodPut)
 	r.HandleFunc("/{id}", session.VerifySession(nil, deleteTransaction)).Methods(http.MethodDelete)
 }
 
 func createTransaction(w http.ResponseWriter, r *http.Request) {
 	userId := session.GetSessionFromRequestContext(r.Context()).GetUserID()
-	queries := r.Context().Value("queries").(*db.Queries)
 
 	var createTransactionReq CreateTransactionReq
 	if err := utils.ParseAndValidateRequest(r.Body, &createTransactionReq); err != nil {
@@ -27,7 +27,7 @@ func createTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	transaction, err := queries.CreateTransaction(r.Context(), db.CreateTransactionParams{
+	transaction, err := db.Queries.CreateTransaction(r.Context(), sqlc.CreateTransactionParams{
 		UserID:      userId,
 		Amount:      fmt.Sprintf("%v", createTransactionReq.Amount),
 		Date:        createTransactionReq.Date,
@@ -46,15 +46,14 @@ func createTransaction(w http.ResponseWriter, r *http.Request) {
 
 func getUserTransactions(w http.ResponseWriter, r *http.Request) {
 	userId := session.GetSessionFromRequestContext(r.Context()).GetUserID()
-	queries := r.Context().Value("queries").(*db.Queries)
 
-	transactions, err := queries.GetUserTransactions(r.Context(), userId)
+	transactions, err := db.Queries.GetUserTransactions(r.Context(), userId)
 	if err != nil {
 		utils.SendJSONResponse(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	res := []db.GetUserTransactionsRow{}
+	res := []sqlc.GetUserTransactionsRow{}
 
 	if len(transactions) > 0 {
 		res = transactions
@@ -97,7 +96,6 @@ func updateTransaction(w http.ResponseWriter, r *http.Request) {
 
 func deleteTransaction(w http.ResponseWriter, r *http.Request) {
 	userId := session.GetSessionFromRequestContext(r.Context()).GetUserID()
-	queries := r.Context().Value("queries").(*db.Queries)
 	transactionId := mux.Vars(r)["id"]
 
 	if len(transactionId) != 36 {
@@ -105,7 +103,7 @@ func deleteTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := queries.DeleteTransaction(r.Context(), db.DeleteTransactionParams{
+	if err := db.Queries.DeleteTransaction(r.Context(), sqlc.DeleteTransactionParams{
 		ID:     transactionId,
 		UserID: userId,
 	}); err != nil {

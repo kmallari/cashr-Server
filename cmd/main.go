@@ -5,7 +5,6 @@ import (
 	"github.com/MadAppGang/httplog"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 	"github.com/kmallari/cashr-Server/api"
 	"github.com/kmallari/cashr-Server/auth"
 	"github.com/kmallari/cashr-Server/db"
@@ -16,33 +15,16 @@ import (
 )
 
 func main() {
-	// load .env file
-	err := godotenv.Load(".env")
-
-	if err != nil {
-		log.Fatalf("Error loading .env file")
-	}
-
-	auth.Init()
-
-	database := db.ConnectDb()
-
 	router := mux.NewRouter()
 
 	router.Use(httplog.LoggerWithConfig(httplog.LoggerConfig{
 		RouterName:  "FillBodyFormatter",
-		Formatter:   httplog.DefaultLogFormatterWithResponseHeadersAndBody,
+		Formatter:   httplog.FullFormatterWithRequestAndResponseHeadersAndBody,
 		CaptureBody: true,
 	}))
-	router.Use(func(next http.Handler) http.Handler {
-		return db.AttachQueries(database, next)
-	})
-	router.Use(func(next http.Handler) http.Handler {
-		return db.AttachDB(database, next)
-	})
 
-	router.HandleFunc("/sessioninfo", session.VerifySession(
-		nil, auth.SessionInfo)).Methods(http.MethodGet)
+	router.HandleFunc("/sessioninfo", session.VerifySession(nil, auth.SessionInfo)).Methods(http.MethodGet)
+	router.HandleFunc("/userinfo", session.VerifySession(nil, auth.UserInfo)).Methods(http.MethodGet)
 	router.HandleFunc("/health", checkHealth)
 
 	api.Handler(router.PathPrefix("/api").Subrouter())
@@ -60,13 +42,26 @@ func main() {
 func checkHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	w.Header().Add("content-type", "application/json")
+
+	err := db.Client.Ping()
+	if err != nil {
+		bytes, _ := json.Marshal(map[string]interface{}{
+			"message": "Error connecting to database",
+		})
+		w.WriteHeader(500)
+		w.Write(bytes)
+		return
+	}
+
 	bytes, err := json.Marshal(map[string]interface{}{
 		"status": "OK",
 	})
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("error in converting to json"))
+		return
 	} else {
 		w.Write(bytes)
+		return
 	}
 }
