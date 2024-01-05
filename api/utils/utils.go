@@ -46,3 +46,11 @@ func SuccessfulDeleteMessage(table string, id string) string {
 	return fmt.Sprintf("Successfully deleted from table `%s` with id: `%s`", table, id)
 }
 func ConvertToKey(index int, key string) string { return fmt.Sprintf("$%s_%v", key, index) }
+
+func Map[T, V any](ts []T, fn func(T) V) []V {
+	result := make([]V, len(ts))
+	for i, t := range ts {
+		result[i] = fn(t)
+	}
+	return result
+}

@@ -13,14 +13,14 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func Handler(r *mux.Router) {
 	r.HandleFunc("", session.VerifySession(nil, createCategory)).Methods(http.MethodPost)
-	//r.HandleFunc("", session.VerifySession(nil, updateCategories)).Methods(http.MethodPut)
 	r.HandleFunc("", session.VerifySession(nil, getUserCategories)).Methods(http.MethodGet)
 	r.HandleFunc("", session.VerifySession(nil, updateCategories)).Methods(http.MethodPut)
-	r.HandleFunc("/{id}", session.VerifySession(nil, deleteCategory)).Methods(http.MethodDelete)
+	r.HandleFunc("", session.VerifySession(nil, deleteCategories)).Methods(http.MethodDelete)
 }
 
 func createCategory(w http.ResponseWriter, r *http.Request) {
@@ -159,25 +159,34 @@ func updateCategories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.SendJSONResponse(w, http.StatusNoContent, "Successfully updated categories.")
+	return
 }
 
-func deleteCategory(w http.ResponseWriter, r *http.Request) {
+func deleteCategories(w http.ResponseWriter, r *http.Request) {
 	userID := session.GetSessionFromRequestContext(r.Context()).GetUserID()
-	categoryId := mux.Vars(r)["id"]
+	categoryIDs := strings.Split(r.URL.Query().Get("ids"), ",")
+	var idsExpression []Expression
 
-	if len(categoryId) != 36 {
-		utils.SendJSONResponse(w, http.StatusBadRequest, utils.InvalidQueryParamError("invalid id"))
-		return
+	for i := 0; i < len(categoryIDs); i++ {
+		idsExpression = append(idsExpression, String(categoryIDs[i]))
 	}
 
-	if err := db.Queries.DeleteCategory(r.Context(), sqlc.DeleteCategoryParams{
-		ID:     categoryId,
-		UserID: userID,
-	}); err != nil {
+	stmt := Category.DELETE().
+		WHERE(Category.ID.IN(idsExpression...).AND(
+			Category.UserID.EQ(String(userID)))).
+		RETURNING(Category.AllColumns)
+	var dest []model.Category
+
+	if err := stmt.Query(db.Client, &dest); err != nil {
 		utils.SendJSONResponse(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	utils.SendJSONResponse(w, http.StatusAccepted, utils.SuccessfulDeleteMessage("transaction", categoryId))
+	if len(dest) == 0 {
+		utils.SendJSONResponse(w, http.StatusNotModified, "No rows deleted.")
+		return
+	}
+
+	utils.SendJSONResponse(w, http.StatusOK, dest)
 	return
 }
